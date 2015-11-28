@@ -1,0 +1,15 @@
+/var/log/pdoxd.log {
+  rotate 3
+  monthly
+  missingok
+  notifempty
+}
+
+/var/log/pdoxd.data {
+  rotate 5
+  weekly
+  compress
+  missingok
+  notifempty
+}
+

@@ -1,0 +1,33 @@
+Notes entourant l'application pdoxd
+
+1. Éléments d'installation
+
+Voici les éléments de configuration mient en place pour soutenir le
+fonctionnement de l'application pdox:
+
+a. L'application est localisée dans /opt/pdoxd/sbin. On y retrouve 
+   l'exécutable nommé pdoxd
+
+b. Le fichier de configuration est localisé dans /opt/pdoxd/etc et se nomme
+   pdoxd.conf
+
+c. Dans le répertoire /etc/rsyslog.d, on retrouve le fichier pdoxd.conf qui
+   identifie les paramètres permettant à l'application de conserver les
+   logs dans les répertoires /var/log/pdoxd.log et /var/log/pdoxd.data
+
+d. Dans le répertoire /etc/logrotate.d, on retrouve le fichier pdoxd qui
+   identifie les paramètre de rotation des fichiers log:
+
+   Pour /var/log/pdoxd.log, la rotation s'effectue une fois par mois et on
+   conserve les 3 derniers fichiers.
+
+   Pour /var/log/pdoxd.data, la rotation s'effectue une fois par semaine et on
+   conserve les 5 derniers fichiers.
+
+e. Pour contrôler le service pdoxd, on peut exécuter les commandes suivantes 
+
+      service pdoxd start
+      service pdoxd stop
+      service pdoxd restart
+
+
