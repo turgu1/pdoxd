@@ -281,7 +281,7 @@ int openMQTT()
   MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
   conn_opts.keepAliveInterval = 20;
-  conn_opts.cleansession = 1;
+  conn_opts.cleansession = 2;
 
   if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
   {
