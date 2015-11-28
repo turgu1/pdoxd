@@ -325,7 +325,11 @@ int readConfig(char *filename)
   return 0;
 }
 
+// ----- MQTT processing -----
+
 MQTTClient mqtt_client;
+
+// ---- connectMQTT() -----
 
 int connectMQTT()
 {
@@ -336,8 +340,7 @@ int connectMQTT()
   conn_opts.cleansession = 0;
   conn_opts.reliable = 0;
 
-  if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
-  {
+  if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS) {
     Log(ERR, "openMQTT: Failed to connect to %s, return code %d\n", mqtt_address, rc);
     return 1;
   }
@@ -345,14 +348,27 @@ int connectMQTT()
   return 0;
 }
 
+// ----- connectionLostMQTT() -----
+
+void connectionLostMQTT(void *context, char *cause)
+{
+  while (connectMQTT()) sleep(10);
+}
+
+// ----- openMQTT() -----
+
 int openMQTT()
 {
   int rc;
 
   MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
+  MQTTClient_setCallbacks(client, NULL, connectionLostMQTT, NULL, NULL);
+
   return connectMQTT();
 }
+
+// ----- sendMQTT() -----
 
 int sendMQTT()
 {
@@ -365,19 +381,11 @@ int sendMQTT()
   pubmsg.qos        = 1;
   pubmsg.retained   = 0;
 
-  do {
-    //startTimer();
-    MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token);
+  rc = MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token);
 
-    rc = MQTTClient_waitForCompletion(mqtt_client, token, 1000L);
-
-    if (rc != 0) {
-      //stopTimer();
-      Log(ERR, "Error code from MQTTClient_waitForCompletion: %d", rc);
-      if (rc == -3) connectMQTT();
-      //startTimer();
-    }
-  } while (rc != 0);
+  if (rc != 0) {
+    Log(ERR, "Error code from MQTTClient_publishMessage: %d", rc);
+  }
 
   return 0;
 }
