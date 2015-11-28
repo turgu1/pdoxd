@@ -19,7 +19,7 @@
 //#include <time.h>
 //#include <errno.h>
 
-#include "MQTTClient.h"
+#include "MQTTAsync.h"
 
 int debugLevel;
 
@@ -327,20 +327,19 @@ int readConfig(char *filename)
 
 // ----- MQTT processing -----
 
-MQTTClient mqtt_client;
+MQTTAsync mqtt_client;
 
 // ---- connectMQTT() -----
 
 int connectMQTT()
 {
-  MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
+  MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
   int rc;
 
   conn_opts.keepAliveInterval = 20;
   conn_opts.cleansession = 0;
-  conn_opts.reliable = 0;
 
-  if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS) {
+  if ((rc = MQTTAsync_connect(mqtt_client, &conn_opts)) != MQTTASYNC_SUCCESS) {
     Log(ERR, "openMQTT: Failed to connect to %s, return code %d\n", mqtt_address, rc);
     return 1;
   }
@@ -352,16 +351,32 @@ int connectMQTT()
 
 void connectionLostMQTT(void *context, char *cause)
 {
-  while (connectMQTT()) sleep(10);
+  Log(ERR, "MQTT Connection Lost... trying to reconnect");
+  while (connectMQTT()) {
+    Log(ERR, "Trying again...");
+    sleep(10);
+  }
 }
 
 // ----- openMQTT() -----
 
 int openMQTT()
 {
-  MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
+  int rc;
 
-  MQTTClient_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
+  if ((rc = MQTTAsync_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL))) {
+    Log(ERR, "Unable to create MQTT Client");
+    return 1;
+  }
+
+  MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
+
+/*
+  if ((rc = MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL))) {
+    Log(ERR, "Unable to set callbacks for MQTT");
+    return 1;
+  }
+*/
 
   return connectMQTT();
 }
@@ -370,8 +385,8 @@ int openMQTT()
 
 int sendMQTT()
 {
-  MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  MQTTClient_deliveryToken token;
+  MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
 
   pubmsg.payload    = data;
@@ -379,10 +394,12 @@ int sendMQTT()
   pubmsg.qos        = 1;
   pubmsg.retained   = 0;
 
-  rc = MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token);
+  opts.context = mqtt_client;
+
+  rc = MQTTAsync_sendMessage(mqtt_client, mqtt_topic, &pubmsg, &opts);
 
   if (rc != 0) {
-    Log(ERR, "Error code from MQTTClient_publishMessage: %d", rc);
+    Log(ERR, "Error code from MQTTAsync_publishMessage: %d", rc);
   }
 
   return 0;

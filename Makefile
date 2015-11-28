@@ -5,7 +5,7 @@ CC = gcc
 #  -g    adds debugging information to the executable file
 #  -Wall turns on most, but not all, compiler warnings
 CFLAGS  = -Wall
-LIBS = -l paho-mqtt3c
+LIBS = -l paho-mqtt3a
 
 # the build target executable:
 TARGET = pdoxd
@@ -17,6 +17,11 @@ $(TARGET): $(TARGET).c
 
 clean:
 	$(RM) $(TARGET)
+
+update: $(TARGET)
+	service pdoxd stop
+	cp pdoxd /opt/pdoxd/sbin
+	service pdoxd start
 
 install: $(TARGET)
 	cp $(TARGET) /opt/$(TARGET)/sbin
