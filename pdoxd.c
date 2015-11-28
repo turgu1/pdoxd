@@ -359,11 +359,9 @@ void connectionLostMQTT(void *context, char *cause)
 
 int openMQTT()
 {
-  int rc;
-
   MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
-  MQTTClient_setCallbacks(client, NULL, connectionLostMQTT, NULL, NULL);
+  MQTTClient_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
 
   return connectMQTT();
 }
