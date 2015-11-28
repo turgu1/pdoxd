@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <syslog.h>
+//#include <time.h>
+//#include <errno.h>
 
 #include "MQTTClient.h"
 
@@ -51,7 +53,58 @@ struct termios serialConfig;   // Serial port config options
 struct sockaddr_in myaddr;     // socket binding data for this machine
 struct sockaddr_in toaddrs[5]; // socket binding data for the host
 
-// ------ Daemon Control -----
+// ----- Timer Signal Handling -----
+/*
+timer_t timer;
+
+int startTimer()
+{
+  struct itimerspec its;
+
+  its.it_value.tv_sec = 60;
+  its.it_value.tv_nsec = 0;
+  its.it_interval.tv_sec = 60;
+  its.it_interval.tv_nsec = 0;
+
+  if (timer_settime(timer, 0, &its, NULL)) {
+    Log(ERR, "startTimer unable to initialise timer: %s", strerror(errno));
+    return 1;
+  }
+  return 0;
+}
+
+void stopTimer()
+{
+  signal(SIGALRM, SIG_IGN);
+}
+
+void timeHandler(int sig)
+{
+  printf("Caught signal %d\n", sig);
+  signal(sig, SIG_IGN);
+  //startTimer();
+  signal(sig, timeHandler);
+}
+
+int initTimer()
+{
+  int rc;
+
+  if (signal(SIGALRM, timeHandler)) {
+    Log(ERR, "initTimer unable to set signal SIGALRM: %s", strerror(errno));
+    return 1;
+  }
+
+  if (timer_create(CLOCK_MONOTONIC, NULL, &timer)) {
+    Log(ERR, "initTimer unable to create a timer: %s", strerror(errno));
+    return 1;
+  }
+
+  return startTimer(); 
+}
+*/
+
+// ----- Daemon Control -----
 
 static void skeletonDaemon()
 {
@@ -234,16 +287,17 @@ int readConfig(char *filename)
       while ((*s != '\0') && (*s != ' ') && (*s != '\n') && (*s != '\r')) s++;
       *s = 0;
 
-      Log(INFO, "Reading config file: %s: %s", param, value);
+      // Log(INFO, "Reading config file: %s: %s", param, value);
 
       if (strcmp(param, "tty") == 0) strcpy(tty, value);
-      if (strcmp(param, "net_if") == 0) strcpy(netIf, value);
-      if (strcmp(param, "port") == 0) port = atoi(value);
-      if (strcmp(param, "baud") == 0) baud = atoi(value);
-      if (strcmp(param, "hosts") == 0) readHosts(value);
-      if (strcmp(param, "mqtt_port") == 0) mqtt_port = atoi(value);
-      if (strcmp(param, "mqtt_server") == 0) strcpy(mqtt_server, value);
-      if (strcmp(param, "mqtt_topic") == 0) strcpy(mqtt_topic, value);
+      else if (strcmp(param, "net_if") == 0) strcpy(netIf, value);
+      else if (strcmp(param, "port") == 0) port = atoi(value);
+      else if (strcmp(param, "baud") == 0) baud = atoi(value);
+      else if (strcmp(param, "hosts") == 0) readHosts(value);
+      else if (strcmp(param, "mqtt_port") == 0) mqtt_port = atoi(value);
+      else if (strcmp(param, "mqtt_server") == 0) strcpy(mqtt_server, value);
+      else if (strcmp(param, "mqtt_topic") == 0) strcpy(mqtt_topic, value);
+      else Log(ERR, "Unknown config parameter: %s", param);
     }
   }
 
@@ -273,15 +327,14 @@ int readConfig(char *filename)
 
 MQTTClient mqtt_client;
 
-int openMQTT()
+int connectMQTT()
 {
   MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
   int rc;
 
-  MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
-
   conn_opts.keepAliveInterval = 20;
-  conn_opts.cleansession = 2;
+  conn_opts.cleansession = 0;
+  conn_opts.reliable = 0;
 
   if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
   {
@@ -290,6 +343,15 @@ int openMQTT()
   }
 
   return 0;
+}
+
+int openMQTT()
+{
+  int rc;
+
+  MQTTClient_create(&mqtt_client, mqtt_address, mqtt_client_id, MQTTCLIENT_PERSISTENCE_NONE, NULL);
+
+  return connectMQTT();
 }
 
 int sendMQTT()
@@ -303,14 +365,19 @@ int sendMQTT()
   pubmsg.qos        = 1;
   pubmsg.retained   = 0;
 
-  MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token);
+  do {
+    //startTimer();
+    MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token);
 
-  rc = MQTTClient_waitForCompletion(mqtt_client, token, 1000L);
+    rc = MQTTClient_waitForCompletion(mqtt_client, token, 1000L);
 
-  if (rc != 0) {
-    Log(ERR, "Error code from MQTTClient_waitForCompletion: %d", rc);
-    if (rc == -3) openMQTT();
-  }
+    if (rc != 0) {
+      //stopTimer();
+      Log(ERR, "Error code from MQTTClient_waitForCompletion: %d", rc);
+      if (rc == -3) connectMQTT();
+      //startTimer();
+    }
+  } while (rc != 0);
 
   return 0;
 }
@@ -532,7 +599,7 @@ void readTTY()
       while ((buffCnt > 0) && (buffIdx < buffCnt)) {
         char ch = buff[buffIdx++];
         *dataPtr++ = ch;
-	if (debugLevel) Log(DEBUG, "readTTY: Got <%d>", ch);
+	      if (debugLevel) Log(DEBUG, "readTTY: Got <%d>", ch);
         if (++dataCnt >= (sizeof(data) - 1)) {
           *dataPtr = 0;
           return;
@@ -588,6 +655,7 @@ int main(int argc, char **argv)
   if (openUDP()) { closeLog(); return 1; }
   if (openTTY()) { closeLog(); return 1; }
   if (openMQTT()) { closeLog(); return 1; }
+  //if (initTimer()) { closeLog(); return 1; }
 
   strcpy(data, "Paradox Data Gathering Bootstrap\n");
   writeUDP();
