@@ -330,32 +330,71 @@ int readConfig(char *filename)
 MQTTAsync mqtt_client;
 
 // ---- connectMQTT() -----
+int mqttConnected = 0;
 
-int connectMQTT()
+void onConnectFailure(void * context, MQTTAsync_failureData* response)
+{
+  mqttConnected = 0;
+}
+
+
+void onConnect(void * context, MQTTAsync_successData* response)
+{
+  mqttConnected = 1;
+}
+
+int connectMQTT(int cleanIt, void * context, int fromCallback)
 {
   MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
   int rc;
 
   conn_opts.keepAliveInterval = 20;
-  conn_opts.cleansession = 0;
+  conn_opts.cleansession = cleanIt;
 
-  if ((rc = MQTTAsync_connect(mqtt_client, &conn_opts)) != MQTTASYNC_SUCCESS) {
-    Log(ERR, "openMQTT: Failed to connect to %s, return code %d\n", mqtt_address, rc);
-    return 1;
+  if (fromCallback == 0) {
+    conn_opts.onSuccess = onConnect;
+    conn_opts.onFailure = onConnectFailure;
   }
+
+  while (1) {
+    mqttConnected = -1;
+
+    while (mqttConnected == -1) {
+
+      if ((rc = MQTTAsync_connect((MQTTAsync) context, &conn_opts)) != MQTTASYNC_SUCCESS) {
+        Log(ERR, "connectMQTT: Failed to connect to %s, return code %d\n", mqtt_address, rc);
+        return 1;
+      }
+      else if (fromCallback) return 0;
+
+      sleep(1);
+      Log(INFO, "Waiting...");
+    }
+
+    if (mqttConnected == 1) break;
+    Log(ERR, "Still trying to connect to MQTT broker...");
+  }
+
+  Log(INFO, "Connected to MQTT Broker");
 
   return 0;
 }
 
 // ----- connectionLostMQTT() -----
 
-void connectionLostMQTT(void *context, char *cause)
+void connectionLostMQTT(void * context, char *cause)
 {
   Log(ERR, "MQTT Connection Lost... trying to reconnect");
-  while (connectMQTT()) {
-    Log(ERR, "Trying again...");
-    sleep(10);
-  }
+
+  connectMQTT(1, context, 1);
+}
+
+int msgarrvd(void *context, char *topicName, int topicLen, MQTTAsync_message *message)
+{
+    MQTTAsync_freeMessage(&message);
+    MQTTAsync_free(topicName);
+
+    return 1;
 }
 
 // ----- openMQTT() -----
@@ -369,16 +408,14 @@ int openMQTT()
     return 1;
   }
 
-  MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
+  //MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
 
-/*
-  if ((rc = MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL))) {
-    Log(ERR, "Unable to set callbacks for MQTT");
+  if ((rc = MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, msgarrvd, NULL))) {
+    Log(ERR, "Unable to set callbacks for MQTT: %d", rc);
     return 1;
   }
-*/
 
-  return connectMQTT();
+  return connectMQTT(1, mqtt_client, 0);
 }
 
 // ----- sendMQTT() -----
@@ -581,6 +618,9 @@ int openTTY()
     serialConfig.c_cflag &= ~CSTOPB;  // One stop bit
     serialConfig.c_cflag &= ~CRTSCTS;  // No hardware flow control
     serialConfig.c_cflag |= (CLOCAL | CREAD | CS8); // Local port, enable Read, 8 bits
+
+    serialConfig.c_cc[VMIN]  = 250;
+    serialConfig.c_cc[VTIME] = 0;
 
     if (tcsetattr(serialPort, TCSAFLUSH, &serialConfig)) {
       Log(ERR, "openTTY: Unable to set serial port parameters");
