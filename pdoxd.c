@@ -16,8 +16,8 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <syslog.h>
-//#include <time.h>
-//#include <errno.h>
+#include <time.h>
+#include <errno.h>
 
 #include "MQTTAsync.h"
 
@@ -52,57 +52,6 @@ struct termios serialConfig;   // Serial port config options
 
 struct sockaddr_in myaddr;     // socket binding data for this machine
 struct sockaddr_in toaddrs[5]; // socket binding data for the host
-
-// ----- Timer Signal Handling -----
-/*
-timer_t timer;
-
-int startTimer()
-{
-  struct itimerspec its;
-
-  its.it_value.tv_sec = 60;
-  its.it_value.tv_nsec = 0;
-  its.it_interval.tv_sec = 60;
-  its.it_interval.tv_nsec = 0;
-
-  if (timer_settime(timer, 0, &its, NULL)) {
-    Log(ERR, "startTimer unable to initialise timer: %s", strerror(errno));
-    return 1;
-  }
-  return 0;
-}
-
-void stopTimer()
-{
-  signal(SIGALRM, SIG_IGN);
-}
-
-void timeHandler(int sig)
-{
-  printf("Caught signal %d\n", sig);
-  signal(sig, SIG_IGN);
-  //startTimer();
-  signal(sig, timeHandler);
-}
-
-int initTimer()
-{
-  int rc;
-
-  if (signal(SIGALRM, timeHandler)) {
-    Log(ERR, "initTimer unable to set signal SIGALRM: %s", strerror(errno));
-    return 1;
-  }
-
-  if (timer_create(CLOCK_MONOTONIC, NULL, &timer)) {
-    Log(ERR, "initTimer unable to create a timer: %s", strerror(errno));
-    return 1;
-  }
-
-  return startTimer(); 
-}
-*/
 
 // ----- Daemon Control -----
 
@@ -382,11 +331,16 @@ int connectMQTT(int cleanIt, void * context, int fromCallback)
 
 // ----- connectionLostMQTT() -----
 
+int startTimer();
+
 void connectionLostMQTT(void * context, char *cause)
 {
   Log(ERR, "MQTT Connection Lost... trying to reconnect");
 
-  connectMQTT(1, context, 1);
+  mqttConnected = -1;
+  startTimer();
+
+  //connectMQTT(1, context, 1);
 }
 
 int msgarrvd(void *context, char *topicName, int topicLen, MQTTAsync_message *message)
@@ -408,8 +362,6 @@ int openMQTT()
     return 1;
   }
 
-  //MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, NULL, NULL);
-
   if ((rc = MQTTAsync_setCallbacks(mqtt_client, NULL, connectionLostMQTT, msgarrvd, NULL))) {
     Log(ERR, "Unable to set callbacks for MQTT: %d", rc);
     return 1;
@@ -418,10 +370,62 @@ int openMQTT()
   return connectMQTT(1, mqtt_client, 0);
 }
 
+// ----- Timer Signal Handling -----
+
+timer_t timer;
+
+void timeHandler(int sig)
+{
+  signal(sig, SIG_IGN);
+  openMQTT();
+}
+
+int startTimer()
+{
+  struct itimerspec its;
+
+  its.it_value.tv_sec = 2;
+  its.it_value.tv_nsec = 0;
+  its.it_interval.tv_sec = 0;
+  its.it_interval.tv_nsec = 0;
+
+  signal(SIGALRM, timeHandler);
+
+  if (timer_settime(timer, 0, &its, NULL)) {
+    Log(ERR, "startTimer unable to initialise timer: %s", strerror(errno));
+    return 1;
+  }
+  return 0;
+}
+
+void stopTimer()
+{
+  signal(SIGALRM, SIG_IGN);
+}
+
+int initTimer()
+{
+  int rc;
+
+  if (signal(SIGALRM, timeHandler)) {
+    Log(ERR, "initTimer unable to set signal SIGALRM: %s", strerror(errno));
+    return 1;
+  }
+
+  if (timer_create(CLOCK_MONOTONIC, NULL, &timer)) {
+    Log(ERR, "initTimer unable to create a timer: %s", strerror(errno));
+    return 1;
+  }
+
+  return 0; 
+}
+
 // ----- sendMQTT() -----
 
 int sendMQTT()
 {
+  if (mqttConnected != 1) return 0;
+
   MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
   MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
   int rc;
@@ -620,7 +624,7 @@ int openTTY()
     serialConfig.c_cflag |= (CLOCAL | CREAD | CS8); // Local port, enable Read, 8 bits
 
     serialConfig.c_cc[VMIN]  = 250;
-    serialConfig.c_cc[VTIME] = 0;
+    serialConfig.c_cc[VTIME] = 1;
 
     if (tcsetattr(serialPort, TCSAFLUSH, &serialConfig)) {
       Log(ERR, "openTTY: Unable to set serial port parameters");
@@ -718,7 +722,7 @@ int main(int argc, char **argv)
   if (openUDP()) { closeLog(); return 1; }
   if (openTTY()) { closeLog(); return 1; }
   if (openMQTT()) { closeLog(); return 1; }
-  //if (initTimer()) { closeLog(); return 1; }
+  if (initTimer()) { closeLog(); return 1; }
 
   strcpy(data, "Paradox Data Gathering Bootstrap\n");
   writeUDP();
